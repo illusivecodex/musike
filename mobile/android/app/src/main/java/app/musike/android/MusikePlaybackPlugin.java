@@ -71,7 +71,7 @@ public class MusikePlaybackPlugin extends Plugin {
     public void audio(PluginCall call) {
         String command = call.getString("cmd", "");
         String url = call.getString("url", "");
-        Double value = call.getDouble("value", 0);
+        Double value = call.getDouble("value", 0.0);
         PlaybackService.audioCommand(getContext(), command, url, value == null ? 0 : value);
         call.resolve();
     }

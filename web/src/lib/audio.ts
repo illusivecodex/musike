@@ -1,3 +1,5 @@
+import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
+
 /**
  * The audio element the player drives.
  *
@@ -22,6 +24,10 @@ interface NativePayload {
 
 const nativeBridge = (globalThis as { webkit?: { messageHandlers?: { musikeAudio?: Bridge } } }).webkit?.messageHandlers
   ?.musikeAudio;
+const androidAudio = registerPlugin<{
+  audio(options: { cmd: string; url?: string; value?: number }): Promise<void>;
+  addListener(event: "audio", fn: (e: { event: string; data: NativePayload }) => void): Promise<PluginListenerHandle>;
+}>("MusikePlayback");
 
 class Buffered {
   constructor(private to: number) {}
@@ -211,7 +217,7 @@ const host = globalThis as {
 
 /** The audio element for this platform: native on iOS, a real `<audio>` everywhere else. */
 export function createAudio(): HTMLAudioElement {
-  if (!nativeBridge) {
+  if (!nativeBridge && Capacitor.getPlatform() !== "android") {
     if (host.__musikeSingletonAudio) {
       host.__musikeSingletonAudio.pause();
       host.__musikeSingletonAudio.removeAttribute("src");
@@ -222,5 +228,23 @@ export function createAudio(): HTMLAudioElement {
     host.__musikeSingletonAudio = audio;
     return audio;
   }
-  return new NativeAudio(nativeBridge) as unknown as HTMLAudioElement;
+  if (nativeBridge) return new NativeAudio(nativeBridge) as unknown as HTMLAudioElement;
+  const bridge: Bridge = {
+    postMessage(message) {
+      const body = message as { cmd?: string; url?: string; value?: number | boolean };
+      void androidAudio.audio({
+        cmd: body.cmd ?? "",
+        url: body.url,
+        value: typeof body.value === "boolean" ? (body.value ? 1 : 0) : body.value,
+      });
+    },
+  };
+  const audio = new NativeAudio(bridge);
+  void androidAudio.addListener("audio", ({ event, data }) => {
+    (globalThis as { __musikeAudioEvent?: (event: string, data: NativePayload) => void }).__musikeAudioEvent?.(
+      event,
+      data,
+    );
+  });
+  return audio as unknown as HTMLAudioElement;
 }

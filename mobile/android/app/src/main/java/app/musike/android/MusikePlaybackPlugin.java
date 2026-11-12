@@ -26,6 +26,14 @@ public class MusikePlaybackPlugin extends Plugin {
             if (position >= 0) event.put("position", position);
             notifyListeners("action", event);
         };
+        PlaybackService.setAudioListener((event, position, duration, buffered, message) -> {
+            JSObject data = new JSObject();
+            data.put("position", position);
+            data.put("duration", duration);
+            data.put("buffered", buffered);
+            if (message != null) data.put("message", message);
+            notifyListeners("audio", new JSObject().put("event", event).put("data", data));
+        });
     }
 
     @PluginMethod
@@ -45,6 +53,7 @@ public class MusikePlaybackPlugin extends Plugin {
             } else {
                 state.positionMs = state.currentPositionMs();
             }
+
             state.positionAt = now;
             if (title != null) state.title = title;
             if (artist != null) state.artist = artist;
@@ -58,9 +67,18 @@ public class MusikePlaybackPlugin extends Plugin {
         call.resolve();
     }
 
+    @PluginMethod
+    public void audio(PluginCall call) {
+        String command = call.getString("cmd", "");
+        String url = call.getString("url", "");
+        Double value = call.getDouble("value", 0);
+        PlaybackService.audioCommand(getContext(), command, url, value == null ? 0 : value);
+        call.resolve();
+    }
+
     @Override
     protected void handleOnDestroy() {
         PlaybackService.listener = null;
-        PlaybackService.shutdown(getContext());
+        PlaybackService.audioListener = null;
     }
 }

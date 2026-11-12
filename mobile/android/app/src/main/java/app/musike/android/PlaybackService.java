@@ -15,6 +15,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.Icon;
 import android.media.AudioManager;
+import android.media.AudioAttributes;
+import android.media.MediaPlayer;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
@@ -31,9 +33,9 @@ import java.net.URL;
 
 /**
  * Keeps Musike alive while music plays and connects it to the system: the media notification, the lock screen,
- * headphone and Bluetooth buttons, and pausing when headphones are unplugged. The music itself plays in the
- * WebView; this service only mirrors what the app reports (see MusikePlaybackPlugin) and relays the buttons back.
- * Everything here runs on the main thread.
+ * headphone and Bluetooth buttons, and pausing when headphones are unplugged. Audio is played here rather than in
+ * the WebView, so it continues after the app is minimized or removed from recents. The app reports metadata and
+ * receives control events through MusikePlaybackPlugin. Everything here runs on the main thread.
  */
 // A media-session notification doesn't need the notification permission (Android 13+ exempts it).
 @SuppressLint("NotificationPermission")
@@ -59,6 +61,90 @@ public class PlaybackService extends Service {
         long currentPositionMs() {
             return playing ? positionMs + (SystemClock.elapsedRealtime() - positionAt) : positionMs;
         }
+
+    }
+
+    interface AudioListener {
+        void onEvent(String event, double position, double duration, double buffered, String message);
+    }
+
+    static void setAudioListener(AudioListener value) {
+        audioListener = value;
+        if (value != null && player != null && playerPrepared) {
+            value.onEvent(player.isPlaying() ? "playing" : "time", position(), duration(), 0, null);
+        }
+    }
+
+    static void audioCommand(Context context, String command, String url, double value) {
+        if (command.equals("load")) {
+            releasePlayer();
+            playRequested = false;
+            if (url == null || url.isEmpty()) {
+                emitAudio("error", 0, 0, 0, "No stream");
+                return;
+            }
+            player = new MediaPlayer();
+            playerPrepared = false;
+            player.setAudioAttributes(new AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
+            player.setOnPreparedListener(p -> {
+                playerPrepared = true;
+                emitAudio("ready", 0, p.getDuration() / 1000.0, 0, null);
+                if (playRequested || state.playing) p.start();
+            });
+            player.setOnCompletionListener(p -> emitAudio("ended", p.getDuration() / 1000.0, p.getDuration() / 1000.0, 0, null));
+            player.setOnErrorListener((p, what, extra) -> {
+                playerPrepared = false;
+                emitAudio("error", 0, 0, 0, "Playback failed");
+                return true;
+            });
+            try {
+                player.setDataSource(context, android.net.Uri.parse(url));
+                player.prepareAsync();
+            } catch (Exception e) {
+                emitAudio("error", 0, 0, 0, e.getMessage());
+            }
+        } else if (player == null) {
+            if (command.equals("play")) emitAudio("error", 0, 0, 0, "No stream");
+        } else if (command.equals("play")) {
+            playRequested = true;
+            if (playerPrepared && !player.isPlaying()) player.start();
+            emitAudio("playing", position(), duration(), 0, null);
+        } else if (command.equals("pause")) {
+            playRequested = false;
+            if (playerPrepared && player.isPlaying()) player.pause();
+        } else if (command.equals("seek")) {
+            if (playerPrepared) {
+                player.seekTo((int) Math.max(0, value * 1000));
+                emitAudio("seeked", value, duration(), 0, null);
+            }
+        } else if (command.equals("volume")) {
+            player.setVolume((float) Math.max(0, Math.min(1, value)), (float) Math.max(0, Math.min(1, value)));
+        } else if (command.equals("muted")) {
+            float volume = value > 0 ? 1 : 0;
+            player.setVolume(volume, volume);
+        }
+        refresh(context);
+    }
+
+    private static double position() {
+        return player == null || !playerPrepared ? 0 : player.getCurrentPosition() / 1000.0;
+    }
+
+    private static double duration() {
+        return player == null || !playerPrepared ? 0 : Math.max(0, player.getDuration() / 1000.0);
+    }
+
+    private static void emitAudio(String event, double position, double duration, double buffered, String message) {
+        if (audioListener != null) audioListener.onEvent(event, position, duration, buffered, message);
+    }
+
+    private static void releasePlayer() {
+        if (player != null) {
+            player.reset();
+            player.release();
+            player = null;
+        }
+        playerPrepared = false;
     }
 
     /** Receives the buttons pressed in the notification, on the lock screen or on headphones. */
@@ -69,7 +155,11 @@ public class PlaybackService extends Service {
 
     static final NowPlaying state = new NowPlaying();
     static Listener listener;
+    static AudioListener audioListener;
     private static PlaybackService instance;
+    private static MediaPlayer player;
+    private static boolean playerPrepared;
+    private static boolean playRequested;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private MediaSession session;
@@ -194,6 +284,7 @@ public class PlaybackService extends Service {
     @Override
     public void onDestroy() {
         instance = null;
+        releasePlayer();
         releaseWakeLock();
         setNoisyReceiver(false);
         session.setActive(false);

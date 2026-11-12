@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { Capacitor } from "@capacitor/core";
 import { getT, useT } from "../i18n";
 import { api, capabilities, explainStreamError, streamSource, systemMedia, type ApiError, type ErrorCode } from "../lib/api";
 import { createAudio } from "../lib/audio";
@@ -69,6 +70,7 @@ interface PlayerState {
 // Media elements live outside React so playback survives any re-render or route change.
 // On iOS this is the native player behind the same API (see lib/audio.ts).
 const audio = createAudio();
+const android = Capacitor.getPlatform() === "android";
 
 const host = globalThis as {
   __musikeSingletonVideo?: HTMLVideoElement;
@@ -167,7 +169,12 @@ const needsClipLookup = (track: Track, preferVideo: boolean) =>
 
 export const usePlayer = create<PlayerState>((set, get) => {
   const kindFor = (track: Track): Kind =>
-    capabilities.video && get().preferVideo && (track.kind === "video" || !!clipFor.get(track.id)) ? "video" : "audio";
+    capabilities.video &&
+    get().preferVideo &&
+    (!android || document.visibilityState !== "hidden") &&
+    (track.kind === "video" || !!clipFor.get(track.id))
+      ? "video"
+      : "audio";
   /** The YouTube id to stream: the song itself, or its music video in Video mode. */
   const mediaIdFor = (track: Track, kind: Kind) =>
     kind === "video" && track.kind !== "video" ? clipFor.get(track.id)! : track.id;
@@ -435,6 +442,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
     if (loaded.kind === kind && (kind === "audio" || loaded.quality === s.quality)) return;
     load(s.index, { startAt: s.position, autoplay: wasPlaying });
   };
+
+  if (android) {
+    document.addEventListener("visibilitychange", reloadIfKindChanged);
+  }
 
   return {
     queue: saved.queue ?? [],

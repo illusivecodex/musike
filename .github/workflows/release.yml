@@ -73,7 +73,7 @@ jobs:
           if-no-files-found: error
 
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v5
@@ -97,7 +97,7 @@ jobs:
           if-no-files-found: error
 
   android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v5
@@ -115,8 +115,8 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.MUSIKE_KEYSTORE_BASE64 }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::warning::MUSIKE_KEYSTORE_BASE64 is not set: the APK will be unsigned and won't install."
-            exit 0
+            echo "::error::MUSIKE_KEYSTORE_BASE64 is not set; refusing to publish an unsigned release APK."
+            exit 1
           fi
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/musike-release.jks"
           echo "MUSIKE_KEYSTORE=$RUNNER_TEMP/musike-release.jks" >> "$GITHUB_ENV"
@@ -164,7 +164,7 @@ jobs:
   release:
     needs: [windows, mac, linux, android, ios]
     if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:

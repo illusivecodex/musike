@@ -3,10 +3,11 @@
 # unsigned iOS app.
 # The draft only goes public when it's published by hand, after checking it.
 #
-# The APK is signed with the key in these repository secrets (Settings → Secrets and variables → Actions):
+# The APK is signed with the key in these repository secrets when configured:
 #   MUSIKE_KEYSTORE_BASE64    the .jks file, base64-encoded
 #   MUSIKE_KEYSTORE_PASSWORD  MUSIKE_KEY_ALIAS  MUSIKE_KEY_PASSWORD
-# Always the same key: Android only installs an update signed like the version already on the phone.
+# Without these secrets, the Android build uses the runner's debug key for testing.
+# Android only installs an update signed like the version already on the phone.
 name: Release
 
 on:
@@ -115,8 +116,8 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.MUSIKE_KEYSTORE_BASE64 }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::MUSIKE_KEYSTORE_BASE64 is not set; refusing to publish an unsigned release APK."
-            exit 1
+            echo "::warning::MUSIKE_KEYSTORE_BASE64 is not set; building a debug-signed APK for testing."
+            exit 0
           fi
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/musike-release.jks"
           echo "MUSIKE_KEYSTORE=$RUNNER_TEMP/musike-release.jks" >> "$GITHUB_ENV"

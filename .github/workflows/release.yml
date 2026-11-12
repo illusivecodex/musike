@@ -16,7 +16,7 @@ on:
     inputs:
       release_tag:
         description: "Existing release tag to receive the built packages"
-        required: false
+        required: true
         type: string
 
 permissions:
